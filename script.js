@@ -1,15 +1,15 @@
 /**
  * @file script.js
  * @description 台灣選舉地圖視覺化工具的主要腳本。
- * @version 60.0.0
+ * @version 61.0.0
  * @date 2025-07-29
  * 主要改進：
- * 1.  **[功能檢修]** 修正了「罷免案分析」中「2024-2025 村里態度轉變分析」表格的診斷邏輯。現在該表格會動態抓取各選區的2024年立委當選者政黨，確保「現任方」與「挑戰方」的定義精確，使其與地圖上的「本次搖擺區」視覺化標準完全一致。
- * 2.  **[邏輯強化]** 重構 `getAggregatedFlipSummaryHtml` 函式，使其不再依賴固定的政黨假設，提升了分析的準確性與彈性。
- * 3.  **[UI優化]** 更新了態度轉變分析表格的文字標籤，使其更清晰地表述「現任方」與「挑戰方」的轉變，避免混淆。
+ * 1.  **[功能新增]** 在「罷免案分析」模式下的「村里詳情」頁面，新增了人口金字塔圖表，使其與一般選舉模式的功能一致。
+ * 2.  **[程式碼重構]** 重構 `renderVillageDetails` 函式，將人口金字塔的 HTML 抽離為獨立區塊，提升程式碼的可讀性與可維護性。
+ * 3.  **[功能檢修]** (來自前一版) 修正了「罷免案分析」中「2024-2025 村里態度轉變分析」表格的診斷邏輯，確保「現任方」與「挑戰方」的定義精確。
  */
 
-console.log('Running script.js version 60.0.0 with repaired recall flip analysis.');
+console.log('Running script.js version 61.0.0 with population pyramid in recall mode.');
 
 // --- 全域變數與設定 ---
 
@@ -919,6 +919,7 @@ async function renderDistrictOverview(districtNames) {
 }
 
 
+// 【更新】重構此函式以在所有模式下加入人口金字塔
 async function renderVillageDetails(village) {
     const container = tabContents[4];
     const { geo_key, fullName, districtName, electorate, total_votes, candidates, reversalCount } = village;
@@ -929,6 +930,17 @@ async function renderVillageDetails(village) {
     const villageElectorateProportion = districtTotalElectorate > 0 ? (electorate / districtTotalElectorate * 100).toFixed(2) : 0;
     
     let mainInfoHtml, villageAnalysisUIHtml;
+
+    // 將人口金字塔的 HTML 抽離，以便在所有模式中共用
+    const populationPyramidHtml = `
+        <div class="p-4 mt-6 border-t pt-4">
+            <h3 class="text-lg font-bold text-gray-800 mb-2">人口金字塔（2024）</h3>
+            <p class="text-sm text-red-600 mb-2">注意：因為<a href="https://zh.wikipedia.org/zh-tw/%E5%8D%80%E7%BE%A4%E8%AC%AC%E8%AA%A4" target="_blank" rel="noopener noreferrer" class="underline hover:text-red-800">生態推論限制</a>，無法用來推測特定年齡層的政黨偏好，僅能瞭解該村里的社會需求。</p>
+            <div id="population-pyramid-container" class="h-80 w-full">
+                <canvas id="village-population-chart"></canvas>
+            </div>
+        </div>
+    `;
 
     if (currentElectionCategory === 'recall') {
         const agreeVotes = candidates.find(c => c.name === 'Agree')?.votes || 0;
@@ -1009,13 +1021,6 @@ async function renderVillageDetails(village) {
                         <p class="text-sm text-yellow-700" id="reversal-count-text">在綜合歷次選舉後，該村里主要政黨領先地位反轉了 ${reversalCount} 次。</p>
                     </div>
                 </div>
-                <div class="mt-6 border-t pt-4">
-                    <h3 class="text-lg font-bold text-gray-800 mb-2">人口金字塔（2024）</h3>
-                    <p class="text-sm text-red-600 mb-2">注意：因為<a href="https://zh.wikipedia.org/zh-tw/%E5%8D%80%E7%BE%A4%E8%AC%AC%E8%AA%A4" target="_blank" rel="noopener noreferrer" class="underline hover:text-red-800">生態推論限制</a>，無法用來推測特定年齡層的政黨偏好，僅能瞭解該村里的社會需求。</p>
-                    <div id="population-pyramid-container" class="h-80 w-full">
-                        <canvas id="village-population-chart"></canvas>
-                    </div>
-                </div>
             </div>`;
         
         const villageAnalysisContainerId = 'village-vote-flow-container';
@@ -1049,7 +1054,8 @@ async function renderVillageDetails(village) {
             <div id="annotation-list" class="max-h-40 overflow-y-auto bg-white rounded p-2"></div>
         </div>`;
 
-    container.innerHTML = mainInfoHtml + villageAnalysisUIHtml + annotationHtml;
+    // 將所有區塊組合起來，並確保人口金字塔在註解區塊之前
+    container.innerHTML = mainInfoHtml + villageAnalysisUIHtml + populationPyramidHtml + annotationHtml;
     injectRecallWarning(4);
     
     document.getElementById('save-annotation-btn').addEventListener('click', () => saveAnnotation(geo_key, fullName));
