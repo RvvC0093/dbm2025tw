@@ -1,15 +1,15 @@
 /**
  * @file script.js
  * @description 台灣選舉地圖視覺化工具的主要腳本。
- * @version 58.0.0
- * @date 2025-07-27
+ * @version 60.0.0
+ * @date 2025-07-29
  * 主要改進：
- * 1.  **[功能擴充]** 「選區總覽」頁面現在支援多選區分析。當使用者選擇多個選區時，會顯示匯總的「村里態度轉變分析」表格與「選區層級歷史催票率趨勢圖」。
- * 2.  **[邏輯重構]** 將單選區與多選區的分析邏輯合併，由統一的函式處理，提升了程式碼的重用性與可維護性。
- * 3.  **[UI優化]** 微調了「村里態度轉變分析」表格的文字說明，使其在各種情況下都更清晰易懂。
+ * 1.  **[功能檢修]** 修正了「罷免案分析」中「2024-2025 村里態度轉變分析」表格的診斷邏輯。現在該表格會動態抓取各選區的2024年立委當選者政黨，確保「現任方」與「挑戰方」的定義精確，使其與地圖上的「本次搖擺區」視覺化標準完全一致。
+ * 2.  **[邏輯強化]** 重構 `getAggregatedFlipSummaryHtml` 函式，使其不再依賴固定的政黨假設，提升了分析的準確性與彈性。
+ * 3.  **[UI優化]** 更新了態度轉變分析表格的文字標籤，使其更清晰地表述「現任方」與「挑戰方」的轉變，避免混淆。
  */
 
-console.log('Running script.js version 58.0.0 with multi-district analysis.');
+console.log('Running script.js version 60.0.0 with repaired recall flip analysis.');
 
 // --- 全域變數與設定 ---
 
@@ -1417,7 +1417,7 @@ async function calculateRecallSwing() {
     hideLoader();
 }
 
-
+// 【修改】此函式現在使用精準的選舉類型進行歷史對比
 async function renderRecallHistoricalAnalysis(village) {
     const geoKey = village.geo_key;
     const districtName = village.districtName;
@@ -1443,14 +1443,22 @@ async function renderRecallHistoricalAnalysis(village) {
     }
 
     let analysisData = {};
-    const relevantYears = ['2014', '2016', '2018', '2020', '2022', '2024'];
+    // **【修改】** 定義罷免案分析所需對照的選舉年份與類型
+    const recallComparisonSources = {
+        '2024': 'legislator', // 2024 對照區域立委
+        '2022': 'mayor',       // 2022 對照縣市長
+        '2020': 'legislator', // 2020 對照區域立委
+        '2018': 'mayor',       // 2018 對照縣市長
+        '2016': 'legislator', // 2016 對照區域立委
+        '2014': 'mayor'        // 2014 對照縣市長
+    };
+    const relevantYears = Object.keys(recallComparisonSources).sort();
+
     relevantYears.forEach(year => {
+        const category = recallComparisonSources[year];
         let yearData = null;
-        for (const cat of ['legislator', 'mayor', 'president', 'party']) {
-            if (allHistory[cat] && allHistory[cat][year]) {
-                yearData = allHistory[cat][year];
-                break; 
-            }
+        if (allHistory[category] && allHistory[category][year]) {
+            yearData = allHistory[category][year];
         }
         
         if (yearData && yearData.electorate > 0) {
@@ -1564,10 +1572,8 @@ function renderRecallComparisonTable(analysisData, containerId) {
 
 // --- 【重構】選區層級（含多選區）分析函式 ---
 
+// **【檢修完成】** 此函式現在動態判斷各村里的現任/挑戰方，使其分析更精確
 async function getAggregatedFlipSummaryHtml(districtNames) {
-    const incumbentParty = KMT_PARTY_NAME; // 假設本次罷免對象皆為國民黨
-    const challengerParty = DPP_PARTY_NAME;
-
     const legislator2024Data = await getVoteData('legislator_2024', dataSources.legislator.years['2024'].path);
     const villages2024Winner = {};
     legislator2024Data.forEach(row => {
@@ -1581,30 +1587,45 @@ async function getAggregatedFlipSummaryHtml(districtNames) {
         if (row.party_name === DPP_PARTY_NAME) villages2024Winner[geo_key].DPP += (row.votes || 0);
     });
 
-    let kmtToChallenger = 0, challengerToKmt = 0, maintained = 0, noDataCount = 0;
+    let incumbentToChallenger = 0; // 從「現任方」轉為「挑戰方」
+    let challengerToIncumbent = 0; // 從「挑戰方」轉為「現任方」
+    let maintained = 0;
+    let noDataCount = 0;
     const villagesInDistricts = Object.values(villageResults).filter(v => districtNames.includes(v.districtName));
     
     villagesInDistricts.forEach(village => {
-        const recallWinnerSide = village.candidates[0].name;
-        const recallWinnerParty = (recallWinnerSide === 'Agree') ? challengerParty : incumbentParty;
-
-        const votes2024 = villages2024Winner[village.geo_key];
-        if (!votes2024 || votes2024.KMT === votes2024.DPP) {
+        // 動態取得此村里選區的現任方與挑戰方政黨
+        const incumbentInfo = incumbentInfoCache[village.districtName];
+        if (!incumbentInfo || (incumbentInfo.party !== KMT_PARTY_NAME && incumbentInfo.party !== DPP_PARTY_NAME)) {
             noDataCount++;
-            return;
+            return; // 若無法判斷現任方，則跳過此村里
+        }
+        const incumbentParty = incumbentInfo.party;
+        const challengerParty = (incumbentParty === KMT_PARTY_NAME) ? DPP_PARTY_NAME : KMT_PARTY_NAME;
+
+        // 判斷 2025 罷免案的結果等同於哪一方勝出
+        const recallWinnerSide = village.candidates[0].name;
+        const recallWinnerPartyEquivalent = (recallWinnerSide === 'Agree') ? challengerParty : incumbentParty;
+
+        // 判斷 2024 立委選舉的結果是哪一方勝出
+        const votes2024 = villages2024Winner[village.geo_key];
+        if (!votes2024 || (votes2024.KMT === 0 && votes2024.DPP === 0) || votes2024.KMT === votes2024.DPP) {
+            noDataCount++;
+            return; // 若無 2024 資料或平手，則跳過
         }
         const winner2024 = (votes2024.KMT > votes2024.DPP) ? KMT_PARTY_NAME : DPP_PARTY_NAME;
 
-        if (winner2024 === incumbentParty && recallWinnerParty === challengerParty) {
-            kmtToChallenger++;
-        } else if (winner2024 === challengerParty && recallWinnerParty === incumbentParty) {
-            challengerToKmt++;
+        // 比較兩次選舉的結果
+        if (winner2024 === incumbentParty && recallWinnerPartyEquivalent === challengerParty) {
+            incumbentToChallenger++; // 2024 現任方優勢 -> 2025 挑戰方(同意)優勢
+        } else if (winner2024 === challengerParty && recallWinnerPartyEquivalent === incumbentParty) {
+            challengerToIncumbent++; // 2024 挑戰方優勢 -> 2025 現任方(不同意)優勢
         } else {
             maintained++;
         }
     });
 
-    const totalCompared = kmtToChallenger + challengerToKmt + maintained;
+    const totalCompared = incumbentToChallenger + challengerToIncumbent + maintained;
     const title = districtNames.length > 1 ? '多選區村里態度轉變分析' : '2024-2025 村里態度轉變分析';
     const descriptionText = `本表比較在 2024 年立委選舉與 2025 年罷免案中，所選 ${districtNames.length} 個選區內，各村里多數方的轉變情況。總計 ${villagesInDistricts.length} 個村里 (其中 ${noDataCount} 個村里因資料不足未計入比較)。`;
 
@@ -1623,18 +1644,18 @@ async function getAggregatedFlipSummaryHtml(districtNames) {
                     <tbody>
                         <tr class="border-b">
                             <td class="py-3">
-                                <span class="font-medium">從「2024國民黨」優勢轉為「支持罷免」優勢</span>
+                                <span class="font-medium">從「2024 現任方」優勢轉為「支持罷免」</span>
                             </td>
                             <td class="py-3 text-right font-bold text-2xl">
-                                <span style="border-bottom: 4px solid #16a34a; padding-bottom: 2px;">${kmtToChallenger}</span>
+                                <span style="border-bottom: 4px solid #16a34a; padding-bottom: 2px;">${incumbentToChallenger}</span>
                             </td>
                         </tr>
                         <tr class="border-b">
                             <td class="py-3">
-                                <span class="font-medium">從「2024落選頭」優勢轉為「反對罷免」優勢</span>
+                                <span class="font-medium">從「2024 挑戰方」優勢轉為「反對罷免」</span>
                             </td>
                             <td class="py-3 text-right font-bold text-2xl">
-                                 <span style="border-bottom: 4px solid #3b82f6; padding-bottom: 2px;">${challengerToKmt}</span>
+                                 <span style="border-bottom: 4px solid #3b82f6; padding-bottom: 2px;">${challengerToIncumbent}</span>
                             </td>
                         </tr>
                         <tr>
@@ -1661,34 +1682,54 @@ function getAggregatedHistoricalRecallHtml(districtNames) {
     `;
 }
 
+// 【修改】此函式現在使用精準的選舉類型進行歷史對比
 async function renderAggregatedHistoricalRecallChart(districtNames) {
     const incumbentParty = KMT_PARTY_NAME;
     const challengerParty = DPP_PARTY_NAME;
 
+    // **【修改】** 定義罷免案分析所需對照的選舉年份與類型
+    const recallComparisonSources = {
+        '2024': 'legislator',
+        '2022': 'mayor',
+        '2020': 'legislator',
+        '2018': 'mayor',
+        '2016': 'legislator',
+        '2014': 'mayor'
+    };
+    const relevantYears = Object.keys(recallComparisonSources);
     const aggregatedHistoricalData = {};
     const villagesInDistricts = Object.values(villageResults).filter(v => districtNames.includes(v.districtName));
 
     villagesInDistricts.forEach(village => {
         const villageHistory = allVillageHistoricalPartyPercentages[village.geo_key];
         if (!villageHistory) return;
-        for (const category in villageHistory) {
-            for (const year in villageHistory[category]) {
+
+        relevantYears.forEach(year => {
+            const category = recallComparisonSources[year];
+            if (villageHistory[category] && villageHistory[category][year]) {
                 if (!aggregatedHistoricalData[year]) {
-                    aggregatedHistoricalData[year] = { KMT: 0, DPP: 0, Other: 0, electorate: 0, total_votes: 0 };
+                    aggregatedHistoricalData[year] = { KMT: 0, DPP: 0, Other: 0, electorate: 0, total_votes: 0, processedVillages: new Set() };
                 }
                 const vData = villageHistory[category][year];
-                aggregatedHistoricalData[year].KMT += vData.KMT || 0;
-                aggregatedHistoricalData[year].DPP += vData.DPP || 0;
-                aggregatedHistoricalData[year].Other += vData.Other || 0;
-                aggregatedHistoricalData[year].electorate += vData.electorate || 0;
-                aggregatedHistoricalData[year].total_votes += vData.total_votes || 0;
+                const geoKey = village.geo_key;
+                
+                // 確保每個村里的數據只被加總一次
+                if (!aggregatedHistoricalData[year].processedVillages.has(geoKey)) {
+                    aggregatedHistoricalData[year].KMT += vData.KMT || 0;
+                    aggregatedHistoricalData[year].DPP += vData.DPP || 0;
+                    aggregatedHistoricalData[year].Other += vData.Other || 0;
+                    aggregatedHistoricalData[year].electorate += vData.electorate || 0;
+                    aggregatedHistoricalData[year].total_votes += vData.total_votes || 0;
+                    aggregatedHistoricalData[year].processedVillages.add(geoKey);
+                }
             }
-        }
+        });
     });
     
     let analysisData = {};
-    const relevantYears = ['2014', '2016', '2018', '2020', '2022', '2024'];
-    relevantYears.forEach(year => {
+    const sortedRelevantYears = Object.keys(aggregatedHistoricalData).sort();
+    
+    sortedRelevantYears.forEach(year => {
         const yearData = aggregatedHistoricalData[year];
         if (yearData && yearData.electorate > 0) {
             analysisData[year] = {
