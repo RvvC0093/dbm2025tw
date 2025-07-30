@@ -1,15 +1,15 @@
 /**
  * @file script.js
  * @description 台灣選舉地圖視覺化工具的主要腳本。
- * @version 61.0.0
- * @date 2025-07-29
+ * @version 62.0.0
+ * @date 2025-07-31
  * 主要改進：
- * 1.  **[功能新增]** 在「罷免案分析」模式下的「村里詳情」頁面，新增了人口金字塔圖表，使其與一般選舉模式的功能一致。
- * 2.  **[程式碼重構]** 重構 `renderVillageDetails` 函式，將人口金字塔的 HTML 抽離為獨立區塊，提升程式碼的可讀性與可維護性。
+ * 1.  **[功能新增]** 根據使用者要求，在所有「歷屆選舉催票率趨勢」折線圖後方，新增關於「其他」政黨資料來源的警示說明，涵蓋選區總覽與村里詳情頁面。
+ * 2.  **[程式碼重構]** 將警示說明的 HTML 抽離，以便在多個函式中重複使用，提升程式碼可維護性。
  * 3.  **[功能檢修]** (來自前一版) 修正了「罷免案分析」中「2024-2025 村里態度轉變分析」表格的診斷邏輯，確保「現任方」與「挑戰方」的定義精確。
  */
 
-console.log('Running script.js version 61.0.0 with population pyramid in recall mode.');
+console.log('Running script.js version 62.0.0 with data source warning.');
 
 // --- 全域變數與設定 ---
 
@@ -931,6 +931,14 @@ async function renderVillageDetails(village) {
     
     let mainInfoHtml, villageAnalysisUIHtml;
 
+    // **[新增]** 將警示說明的 HTML 抽離，以便在多個函式中重複使用
+    const warningHtml = `
+        <div class="mt-3 p-3 bg-yellow-50 border-l-4 border-yellow-500 text-yellow-800 rounded-md text-xs">
+            <p class="font-bold">分析工具限制</p>
+            <p>因為本工具自動化串接的限制，「其他」是加總國民黨與民進黨以外的所有數值。若要分析該選區第三勢力作用與特定候選人的表現，需要再取得中選會資料個別進行研究。</p>
+        </div>
+    `;
+
     // 將人口金字塔的 HTML 抽離，以便在所有模式中共用
     const populationPyramidHtml = `
         <div class="p-4 mt-6 border-t pt-4">
@@ -980,6 +988,7 @@ async function renderVillageDetails(village) {
                 <p class="text-sm text-gray-600 mb-4">比較此村里在 2025 罷免案中「同意/不同意」方的催票實力，與歷屆選舉中「挑戰者/現任者」政黨的催票率消長。有助於判斷罷免案的動員能量來源。</p>
                 <div id="historical-chart-container" class="h-72 w-full mt-4"><p class="text-gray-500 animate-pulse text-center pt-12">正在載入歷史催票率資料...</p></div>
                 <div id="${villageAnalysisContainerId}" class="mt-4"></div>
+                ${warningHtml}
             </div>`;
 
     } else {
@@ -1016,6 +1025,7 @@ async function renderVillageDetails(village) {
                 <div class="mt-4 h-64"><canvas id="village-vote-chart"></canvas></div>
                 <div class="mt-6 border-t pt-4">
                     <div id="historical-chart-container" class="h-72 w-full"><p class="text-gray-500 animate-pulse text-center pt-12">正在載入歷史催票率資料...</p></div>
+                    ${warningHtml}
                     <div id="attitude-reversal-info" class="mt-4 p-3 bg-yellow-50 border-l-4 border-yellow-500 rounded ${reversalCount === 0 ? 'hidden' : ''}">
                         <p class="font-bold text-yellow-800">搖擺程度分析</p>
                         <p class="text-sm text-yellow-700" id="reversal-count-text">在綜合歷次選舉後，該村里主要政黨領先地位反轉了 ${reversalCount} 次。</p>
@@ -1678,12 +1688,20 @@ async function getAggregatedFlipSummaryHtml(districtNames) {
 function getAggregatedHistoricalRecallHtml(districtNames) {
     const tableContainerId = `district-recall-table-aggregated`;
     const title = districtNames.length > 1 ? '多選區層級' : '選區層級';
+    // **[新增]** 將警示說明的 HTML 抽離
+    const warningHtml = `
+        <div class="mt-3 p-3 bg-yellow-50 border-l-4 border-yellow-500 text-yellow-800 rounded-md text-xs">
+            <p class="font-bold">分析工具限制</p>
+            <p>因為本工具自動化串接的限制，「其他」是加總國民黨與民進黨以外的所有數值。若要分析該選區第三勢力作用與特定候選人的表現，需要再取得中選會資料個別進行研究。</p>
+        </div>
+    `;
     return `
         <div>
             <h3 class="text-xl font-bold text-gray-800 mb-3">${title}：罷免案 vs 歷屆選舉催票率趨勢</h3>
             <p class="text-sm text-gray-600 mb-4">比較此<span class="font-bold">區域整體</span>在 2025 罷免案中「同意/不同意」方的催票實力，與歷屆選舉中「挑戰者/現任者」政黨的催票率消長。</p>
             <div class="h-72 w-full mt-4 bg-gray-50 rounded-lg p-2"><canvas id="district-historical-recall-chart"></canvas></div>
             <div id="${tableContainerId}" class="mt-4"></div>
+            ${warningHtml}
         </div>
     `;
 }
@@ -1798,12 +1816,20 @@ async function renderAggregatedHistoricalRecallChart(districtNames) {
 function getAggregatedHistoricalGeneralHtml(districtNames) {
     const tableContainerId = `district-general-table-aggregated`;
     const title = districtNames.length > 1 ? '多選區層級' : '選區層級';
+    // **[新增]** 將警示說明的 HTML 抽離
+    const warningHtml = `
+        <div class="mt-3 p-3 bg-yellow-50 border-l-4 border-yellow-500 text-yellow-800 rounded-md text-xs">
+            <p class="font-bold">分析工具限制</p>
+            <p>因為本工具自動化串接的限制，「其他」是加總國民黨與民進黨以外的所有數值。若要分析該選區第三勢力作用與特定候選人的表現，需要再取得中選會資料個別進行研究。</p>
+        </div>
+    `;
     return `
         <div>
             <h3 class="text-xl font-bold text-gray-800 mb-3">${title}：歷年催票率趨勢 (同類選舉)</h3>
             <p class="text-sm text-gray-600 mb-4">比較此<span class="font-bold">區域整體</span>在同類型選舉的歷年催票率變化，觀察主要政黨在此地的基本盤消長。</p>
             <div class="h-72 w-full mt-4 bg-gray-50 rounded-lg p-2"><canvas id="district-historical-general-chart"></canvas></div>
             <div id="${tableContainerId}" class="mt-4"></div>
+            ${warningHtml}
         </div>
     `;
 }
