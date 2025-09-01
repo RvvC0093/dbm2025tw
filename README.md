@@ -6,7 +6,7 @@
 
 * **多模式選舉分析**：  
   * **一般選舉模式**：可自由切換分析 2012 至 2024 年間的「總統」、「立法委員」、「縣市長」與「政黨票」選舉資料。  
-  * **(新) 罷免案分析模式**：專為 2025 年罷免案設計，提供獨特的視覺化與歷史趨勢對比功能。  
+  * **(新) 罷免案分析模式**：專為 2025 年罷免案設計，提供獨特的視覺化與歷史趨勢對比功能。現在支援分析 **2025 年 7 月 26 日**、**8 月 23 日**的投票結果，並提供**綜合彙整**分析選項。  
 * **互動式地圖 (使用 [Leaflet.js](https://leafletjs.com/))**：  
   * 根據選舉結果的政黨傾向或罷免案的立場進行顏色編碼。  
   * **票倉視覺化**：村里區塊的透明度根據該地「選舉人數佔選區總人數的比例」分級。佔比越高的村里（票倉），顏色越不透明，讓您輕易識別出選區內的關鍵區域。  
@@ -32,27 +32,26 @@
 
 本專案為純前端應用，無需後端伺服器。所有資料皆存放於 data 資料夾中。  
 .  
-├── index.html         \# 主要 HTML 檔案  
-├── script.js          \# 主要 JavaScript 邏輯  
-├── README.md          \# 本說明文件  
+├── index.html \# 主要 HTML 檔案  
+├── script.js \# 主要 JavaScript 邏輯  
+├── README.md \# 本說明文件  
 └── data/  
-    ├── village.json   \# TopoJSON 格式的台灣村里地理圖資  
-    ├── 2024/  
-    │   ├── regional\_legislator\_votes.csv  
-    │   ├── president\_votes.csv  
-    │   ├── party\_votes.csv  
-    │   └── U01VI-2024M12-TW.csv  \# 人口統計資料  
-    ├── 2022/  
-    │   └── mayor\_votes.csv  
-    ├── 2020/  
-    │   └── ... (以此類推)  
-    └── 2025/  
-        └── 20250726\_village.csv  \# 罷免案投票結果
+├── village.json \# TopoJSON 格式的台灣村里地理圖資  
+├── 2025/  
+│ ├── 20250726\_village.csv \# 7/26 罷免案投票結果  
+│ └── 20250823\_village.csv \# 8/23 罷免案投票結果 (新增)  
+├── 2024/  
+│ ├── regional\_legislator\_votes.csv  
+│ ├── president\_votes.csv  
+│ ├── party\_votes.csv  
+│ └── U01VI-2024M12-TW.csv \# 人口統計資料  
+├── 2022/  
+│ └── mayor\_votes.csv  
+└── ... (以此類推)
 
 ### **CSV 資料欄位定義**
 
-為了讓 script.js 能正確解析，請確保所有選舉資料的 CSV 檔案都包含以下標準欄位：  
-**1\. 一般選舉 (立委、縣市長、總統、政黨票)**
+為了讓 script.js 能正確解析，請確保所有選舉資料的 CSV 檔案都包含以下標準欄位： **1\. 一般選舉 (立委、縣市長、總統、政黨票)**
 
 | 欄位名稱 | 資料類型 | 說明 | 範例 |
 | :---- | :---- | :---- | :---- |
@@ -67,7 +66,7 @@
 | electorate | Number | **\[必要\]** 該村里總選舉人數 | 3500 |
 | total\_votes | Number | **\[必要\]** 該村里總投票數 (有效+無效) | 2800 |
 
-**2\. 罷免案 (20250726\_village.csv)**
+**2\. 罷免案 (例如 20250726\_village.csv)**
 
 | 欄位名稱 | 資料類型 | 說明 | 範例 |
 | :---- | :---- | :---- | :---- |
@@ -86,7 +85,7 @@
 為了方便維護與擴充，script.js 的主要邏輯圍繞以下核心函式展開：
 
 * **初始化與事件監聽 (initialize..., setupEventListeners)**: 設定地圖、圖表與所有 UI 元件的初始狀態及互動事件。  
-* **資料處理 (processVoteData, loadAllWinners, calculate...)**: 負責讀取、解析 CSV 資料，並計算各種分析所需的指標（如：催票率、搖擺區等）。  
+* **資料處理 (getVoteData, getCombinedRecallData, processVoteData, ...)**: 負責讀取、解析、快取與彙整 CSV 資料，並計算各種分析所需的指標（如：催票率、搖擺區等）。  
 * **主流程控制 (selectElectionCategory, loadAndDisplayYear, handleDistrictSelection)**: 管理使用者從選擇選舉類型到檢視地圖的整個流程。  
 * **UI 渲染 (renderMapLayers, renderDistrictOverview, renderVillageDetails)**: 根據處理好的資料，將地圖、圖表與詳細資訊面板動態繪製到畫面上。  
 * **罷免案專用分析 (renderRecallHistoricalAnalysis, calculateRecallSwing)**: 處理罷免案模式下獨有的歷史對比與本次搖擺區計算邏輯。
@@ -102,5 +101,5 @@
 * **地圖**: [Leaflet.js](https://leafletjs.com/)  
 * **圖表**: [Chart.js](https://www.chartjs.org/)  
 * **前端框架/函式庫**: Vanilla JavaScript, [Tailwind CSS](https://tailwindcss.com/)  
-* **資料解析**: [PapaParse](https://www.papaparse.com/)  
+* **資料解析**: [PapaParse](https://www.google.com/search?q=https://www.paparse.com/)  
 * **地理資料格式**: [TopoJSON](https://github.com/topojson/topojson)
