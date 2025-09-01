@@ -1,15 +1,15 @@
 /**
  * @file script.js
  * @description 台灣選舉地圖視覺化工具的主要腳本。
- * @version 62.0.0
- * @date 2025-07-31
+ * @version 64.0.0
+ * @date 2025-09-01
  * 主要改進：
- * 1.  **[功能新增]** 根據使用者要求，在所有「歷屆選舉催票率趨勢」折線圖後方，新增關於「其他」政黨資料來源的警示說明，涵蓋選區總覽與村里詳情頁面。
- * 2.  **[程式碼重構]** 將警示說明的 HTML 抽離，以便在多個函式中重複使用，提升程式碼可維護性。
- * 3.  **[功能檢修]** (來自前一版) 修正了「罷免案分析」中「2024-2025 村里態度轉變分析」表格的診斷邏輯，確保「現任方」與「挑戰方」的定義精確。
+ * 1.  **[功能擴充]** 根據使用者要求，在「罷免案分析」中新增對 2025 年兩次罷免投票的支援。
+ * 2.  **[UI 更新]** 年份篩選器現在提供「20250726」、「20250823」以及「2025 彙整」三種罷免分析選項。
+ * 3.  **[資料邏輯]** 新增彙整兩次罷免投票資料的邏輯，將票數加總，並以最大值作為選舉人數，以進行綜合分析。
  */
 
-console.log('Running script.js version 62.0.0 with data source warning.');
+console.log('Running script.js version 64.0.0 with multiple recall data support.');
 
 // --- 全域變數與設定 ---
 
@@ -82,7 +82,12 @@ const dataSources = {
         districtIdentifier: 'electoral_district_name',
         showRecallDistricts: false, // 在此模式下，顯示所有在資料檔中出現的選區
         years: {
-            '2025': { path: 'data/2025/20250726_village.csv', name: '20250726 罷免投票' },
+            '2025-all': { 
+                name: '2025 罷免投票彙整', 
+                paths: ['data/2025/20250726_village.csv', 'data/2025/20250823_village.csv'] 
+            },
+            '2025-2': { path: 'data/2025/20250823_village.csv', name: '20250823 罷免投票' },
+            '2025-1': { path: 'data/2025/20250726_village.csv', name: '20250726 罷免投票' },
         }
     },
     legislator: {
@@ -343,10 +348,19 @@ function populateYearFilter() {
     const categoryData = dataSources[currentElectionCategory];
     if (!categoryData) return;
 
-    const years = Object.keys(categoryData.years).sort((a, b) => b - a);
+    let years;
+    if (currentElectionCategory === 'recall') {
+        years = Object.keys(categoryData.years).sort((a, b) => {
+            if (a === '2025-all') return -1; // 'all' always first
+            if (b === '2025-all') return 1;
+            return b.localeCompare(a); // Sort others descending (2025-2 before 2025-1)
+        });
+    } else {
+        years = Object.keys(categoryData.years).sort((a, b) => b - a);
+    }
     yearSelector.innerHTML = '<option value="none" selected>— 請選擇 —</option>';
-    years.forEach(year => {
-        yearSelector.innerHTML += `<option value="${year}">${categoryData.years[year].name}</option>`;
+    years.forEach(yearKey => {
+        yearSelector.innerHTML += `<option value="${yearKey}">${categoryData.years[yearKey].name}</option>`;
     });
 }
 
@@ -375,8 +389,15 @@ async function loadAndDisplayYear(year) {
     await new Promise(resolve => setTimeout(resolve, 50)); // 確保 UI 更新
 
     try {
-        const voteDataRows = await getVoteData(`${currentElectionCategory}_${year}`, source.path);
-        await processVoteData(voteDataRows);
+        let voteDataRows;
+        const cacheKey = `${currentElectionCategory}_${year}`;
+
+        if (source.paths) { // It's the combined recall option
+            voteDataRows = await getCombinedRecallData(cacheKey, source.paths);
+        } else { // It's a single file
+            voteDataRows = await getVoteData(cacheKey, source.path);
+        }
+        await processVoteData(voteDataRows, year);
         await populateDistrictFilter();
         
         if (geoJsonLayer) map.removeLayer(geoJsonLayer);
@@ -437,6 +458,44 @@ async function handleDistrictSelection() {
 // --- 資料處理 ---
 async function getVoteData(cacheKey, path) { if (voteDataCache[cacheKey]) return voteDataCache[cacheKey]; try { const rows = await new Promise((resolve, reject) => { Papa.parse(path, { download: true, header: true, dynamicTyping: true, skipEmptyLines: true, complete: res => { if (res.errors.length) { console.error(`解析 ${path} 時發生錯誤:`, res.errors); resolve(res.data); } else { resolve(res.data); } }, error: err => { console.error(`下載或讀取 ${path} 時發生網路錯誤:`, err); reject(err); } }); }); voteDataCache[cacheKey] = rows; return rows; } catch (error) { console.error(`載入 ${path} 資料時發生嚴重錯誤:`, error); return []; } }
 
+async function getCombinedRecallData(cacheKey, paths) {
+    if (voteDataCache[cacheKey]) return voteDataCache[cacheKey];
+
+    showLoader('正在彙整多次罷免投票資料...');
+    await new Promise(resolve => setTimeout(resolve, 50));
+
+    const [data1, data2] = await Promise.all([
+        getVoteData(paths[0], paths[0]), // Use path as cache key for individual files
+        getVoteData(paths[1], paths[1])
+    ]);
+
+    const combined = new Map();
+
+    data1.forEach(row => {
+        if (row.geo_key) {
+            combined.set(row.geo_key, { ...row });
+        }
+    });
+
+    data2.forEach(row => {
+        if (row.geo_key) {
+            if (combined.has(row.geo_key)) {
+                const existing = combined.get(row.geo_key);
+                existing.Agree = (existing.Agree || 0) + (row.Agree || 0);
+                existing.Disagree = (existing.Disagree || 0) + (row.Disagree || 0);
+                existing.electorate = Math.max(existing.electorate || 0, row.electorate || 0);
+                existing.total_votes = (existing.total_votes || 0) + (row.total_votes || 0);
+            } else {
+                combined.set(row.geo_key, { ...row });
+            }
+        }
+    });
+
+    const result = Array.from(combined.values());
+    voteDataCache[cacheKey] = result;
+    return result;
+}
+
 // 載入人口資料
 async function loadPopulationData() {
     try {
@@ -465,7 +524,7 @@ async function loadPopulationData() {
 async function loadAllWinners() { for (const category in dataSources) { if (category === 'recall') continue; const categoryData = dataSources[category]; for (const year in categoryData.years) { const source = categoryData.years[year]; const cacheKey = `${category}_${year}`; const voteDataRows = await getVoteData(cacheKey, source.path); voteDataRows.forEach(row => { const geo_key = row.geo_key || row.VILLCODE; const { party_name, candidate_name, votes, electorate, total_votes } = row; if (!geo_key || electorate === undefined || electorate === null) return; if (!allVillageHistoricalPartyPercentages[geo_key]) { allVillageHistoricalPartyPercentages[geo_key] = {}; } if (!allVillageHistoricalPartyPercentages[geo_key][category]) { allVillageHistoricalPartyPercentages[geo_key][category] = {}; } if (!allVillageHistoricalPartyPercentages[geo_key][category][year]) { allVillageHistoricalPartyPercentages[geo_key][category][year] = { KMT: 0, DPP: 0, Other: 0, electorate: 0, total_votes: 0, candidateVotes: {} }; } const villageYearData = allVillageHistoricalPartyPercentages[geo_key][category][year]; if (party_name === KMT_PARTY_NAME) villageYearData.KMT += votes || 0; else if (party_name === DPP_PARTY_NAME) villageYearData.DPP += votes || 0; else villageYearData.Other += votes || 0; const entityKey = (category === 'party') ? party_name : candidate_name; if (entityKey) { if (!villageYearData.candidateVotes[entityKey]) { villageYearData.candidateVotes[entityKey] = 0; } villageYearData.candidateVotes[entityKey] += votes || 0; } if (villageYearData.electorate === 0 && electorate > 0) villageYearData.electorate = electorate; if (villageYearData.total_votes === 0 && total_votes > 0) villageYearData.total_votes = total_votes; }); } } }
 function calculateAllVillageReversalCounts() { for (const geoKey in allVillageHistoricalPartyPercentages) { villageReversalCounts[geoKey] = {}; const allCategoriesForVillage = Object.keys(allVillageHistoricalPartyPercentages[geoKey]); for (const category of allCategoriesForVillage) { let historyToCalculate = allVillageHistoricalPartyPercentages[geoKey][category]; if (category !== 'mayor') { const mayorHistory = allVillageHistoricalPartyPercentages[geoKey]['mayor'] || {}; const combinedHistory = { ...mayorHistory, ...historyToCalculate }; historyToCalculate = combinedHistory; } villageReversalCounts[geoKey][category] = calculateAttitudeReversals(historyToCalculate); } } }
 
-async function processVoteData(voteData) {
+async function processVoteData(voteData, yearKey) {
     villageResults = {}; districtResults = {}; geoKeyToDistrictMap = {}; winners = {};
     const categoryData = dataSources[currentElectionCategory];
     const districtIdentifier = categoryData.districtIdentifier;
@@ -1907,7 +1966,6 @@ function injectRecallWarning(tabIndex) {
         `;
     }
 }
-
 
 function saveAnnotation(geoKey, name) { const note = document.getElementById('annotation-input').value; if (!note.trim()) { deleteAnnotation(geoKey); return; } const targetLayer = geoJsonLayer.getLayers().find(l => l.feature.properties.VILLCODE === geoKey); const center = targetLayer ? targetLayer.getBounds().getCenter() : map.getCenter(); annotations[geoKey] = { name, note, lat: center.lat, lng: center.lng }; addOrUpdateMarker(geoKey); renderAnnotationList(); showMessageBox(`已儲存對「${name}」的註解！`); }
 function deleteAnnotation(geoKey) { if (annotations[geoKey]) { const name = annotations[geoKey].name; delete annotations[geoKey]; addOrUpdateMarker(geoKey); renderAnnotationList(); document.getElementById('annotation-input').value = ''; showMessageBox(`對「${name}」的註解已刪除！`); } }
